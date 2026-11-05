@@ -1,0 +1,61 @@
+name: Promo bot
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # repo privado. Depois de tornar PÚBLICO, troque por */5 (Actions ilimitado).
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promo-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STATE_KEY: ${{ secrets.STATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Descriptografar estado
+        run: |
+          if [ -z "$STATE_KEY" ]; then echo "Defina o secret STATE_KEY"; exit 1; fi
+          if [ -f state.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in state.enc -out state.json -pass env:STATE_KEY \
+              || { echo "Falha ao descriptografar: STATE_KEY diferente da usada antes?"; exit 1; }
+          fi
+          if [ -f state.json ]; then sha256sum state.json > "$RUNNER_TEMP/before.sha"; else echo none > "$RUNNER_TEMP/before.sha"; fi
+
+      - name: Executar bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+        run: python bot.py
+
+      - name: Salvar estado (criptografado)
+        run: |
+          if [ -f state.json ]; then sha256sum state.json > "$RUNNER_TEMP/after.sha"; else echo none > "$RUNNER_TEMP/after.sha"; fi
+          cmp -s "$RUNNER_TEMP/before.sha" "$RUNNER_TEMP/after.sha" && { echo "estado sem mudanças"; exit 0; }
+          openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in state.json -out "$RUNNER_TEMP/state.enc" -pass env:STATE_KEY
+          git config user.name "promo-bot"
+          git config user.email "promo-bot@users.noreply.github.com"
+          for i in 1 2 3 4; do
+            git fetch origin main
+            git reset --hard origin/main
+            cp "$RUNNER_TEMP/state.enc" state.enc
+            git add state.enc
+            git commit -m "chore: atualiza estado" || exit 0
+            git push origin HEAD:main && exit 0
+            sleep $((i * 3))
+          done
+          exit 1
