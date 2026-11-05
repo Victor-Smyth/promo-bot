@@ -2,7 +2,7 @@ name: Promo bot
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # repo privado. Depois de tornar PÚBLICO, troque por */5 (Actions ilimitado).
+    - cron: "*/5 * * * *"   # repo público: Actions ilimitado. Se voltar a privado, use */30.
   workflow_dispatch:
 
 permissions:
