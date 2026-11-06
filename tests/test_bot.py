@@ -117,3 +117,26 @@ def test_retry_on_429():
             assert "DISCORD_CHANNEL_ID" in str(e) and estados["n"] == 1
     finally:
         bot.urllib.request.urlopen = orig
+
+
+def test_liga_desliga():
+    SENT.clear()
+    st = bot.default_state(); st["interests"] = [bot.parse_interest("creatina")]
+    f1 = lambda: [offer(1, "Creatina A", 50)]
+    bot.scan(st, [f1])                                    # aprende
+    assert "desligado" in bot.handle_command(st, "telegram", 10, "/desligar")
+    assert st["paused"] is True
+    assert "já está desligado" in bot.handle_command(st, "telegram", 10, "!pausar")
+    f2 = lambda: [offer(2, "Creatina B", 40)]
+    assert bot.scan(st, [f2]) == 0 and SENT == []         # desligado: não avisa
+    assert "desligado" in bot.handle_command(st, "telegram", 10, "/status")
+    assert "adicionado" in bot.handle_command(st, "telegram", 10, "/adicionar whey").lower()  # comandos seguem
+    assert "ligado" in bot.handle_command(st, "telegram", 10, "/ligar") and st["paused"] is False
+    assert "já está ligado" in bot.handle_command(st, "telegram", 10, "/ligar")
+    f3 = lambda: [offer(2, "Creatina B", 40), offer(3, "Creatina C", 30)]
+    assert bot.scan(st, [f3]) == 1                        # B foi visto durante a pausa; só C avisa
+    assert "Creatina C" in SENT[0]
+    old = {"offset": 0, "owner": None}
+    import json, tempfile, os
+    p = os.path.join(tempfile.mkdtemp(), "s.json"); open(p, "w").write(json.dumps({"interests": [], "seen": ["x"]}))
+    bot.STATE_FILE = bot.Path(p); assert bot.load_state()["paused"] is False  # estado antigo sem a chave

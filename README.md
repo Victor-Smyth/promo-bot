@@ -8,6 +8,9 @@ Avisa no Discord e/ou Telegram só das promoções que casam com os seus interes
 | `/adicionar` (ou `!adicionar` no Discord) | `/adicionar creatina` · `/adicionar ssd 1tb ate 400` · `/adicionar galaxy s24 -capa -pelicula` |
 | `/remover` | `/remover creatina` |
 | `/lista` | mostra seus interesses |
+| `/desligar` · `/ligar` · `/status` | pausa / retoma os alertas (vale para Discord e Telegram); os interesses ficam salvos |
+
+Desligado, o bot continua rodando e aceitando comandos, mas não envia alertas; as ofertas publicadas nesse período não são reenviadas ao religar. Para parar de vez, pause o job no cron-job.org e/ou desative o workflow no GitHub.
 
 Todas as palavras do termo precisam estar no título. `ate N` define preço máximo; `-palavra` exclui.
 

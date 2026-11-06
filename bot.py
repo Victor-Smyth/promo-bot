@@ -21,6 +21,9 @@ AJUDA = (
     "/adicionar galaxy s24 -capa -pelicula  (palavras a excluir)\n"
     "/remover creatina\n"
     "/lista\n"
+    "/desligar  (pausa os alertas)\n"
+    "/ligar  (volta a enviar alertas)\n"
+    "/status\n"
     "/ajuda\n\n"
     "Todas as palavras do termo precisam aparecer no título da oferta. "
     "Os comandos são processados a cada rodada do agendador (pode levar alguns minutos)."
@@ -29,7 +32,7 @@ AJUDA = (
 # ---------- estado ----------
 def default_state():
     return {"telegram": {"offset": 0, "owner": None}, "discord": {"last_id": None, "owner": None},
-            "interests": [], "seen": []}
+            "interests": [], "seen": [], "paused": False}
 
 def load_state():
     st = default_state()
@@ -188,10 +191,25 @@ def handle_command(st, chan, sender, text):
         antes = len(st["interests"])
         st["interests"] = [x for x in st["interests"] if norm(x["termo"]) != alvo]
         return "🗑️ Removido." if len(st["interests"]) < antes else "Não encontrei esse interesse. Veja /lista."
+    if cmd in ("/desligar", "/pausar", "/off"):
+        if st.get("paused"):
+            return "⏸️ O bot já está desligado. Use /ligar para voltar."
+        st["paused"] = True
+        return ("⏸️ Bot desligado. Não vou enviar alertas até você usar /ligar.\n"
+                "Seus interesses continuam salvos e os comandos continuam funcionando.")
+    if cmd in ("/ligar", "/retomar", "/on"):
+        if not st.get("paused"):
+            return "▶️ O bot já está ligado."
+        st["paused"] = False
+        return "▶️ Bot ligado. Você volta a receber alertas das ofertas novas (as publicadas enquanto esteve desligado não serão enviadas)."
+    if cmd == "/status":
+        estado = "⏸️ desligado" if st.get("paused") else "▶️ ligado"
+        return f"Status: {estado}\nInteresses: {len(st['interests'])}\nOfertas já vistas: {len(st['seen'])}"
     if cmd == "/lista":
         if not st["interests"]:
             return "Nenhum interesse ainda. Use /adicionar creatina"
-        return "📋 Seus interesses:\n" + "\n".join(f"• {fmt_interest(i)}" for i in st["interests"])
+        cab = "⏸️ (bot desligado)\n" if st.get("paused") else ""
+        return cab + "📋 Seus interesses:\n" + "\n".join(f"• {fmt_interest(i)}" for i in st["interests"])
     return "Comando não reconhecido.\n\n" + AJUDA
 
 def process_telegram(st):
@@ -336,7 +354,7 @@ SOURCES = [fetch_promobit, fetch_pelando]
 def scan(st, fetchers=None):
     """Busca ofertas, avisa as novas que casam, marca todas como vistas."""
     seen = set(st["seen"])
-    first_run = not st["seen"]
+    silent = not st["seen"] or st.get("paused", False)  # 1ª rodada ou bot desligado: só memoriza
     sent = 0
     for fetch in (fetchers or SOURCES):
         try:
@@ -348,8 +366,8 @@ def scan(st, fetchers=None):
             if o["id"] in seen:
                 continue
             seen.add(o["id"]); st["seen"].append(o["id"])
-            if first_run:
-                continue  # 1ª rodada só "aprende" o que já existe, sem spam
+            if silent:
+                continue  # não envia: só marca como visto (evita enxurrada ao religar)
             for it in st["interests"]:
                 if matches(it, o):
                     notify(st, fmt_offer(o, it)); sent += 1
@@ -364,7 +382,7 @@ def main():
     sent = scan(st)
     save_state(st)
     canais = [c for c, on in (("telegram", bool(TG_TOKEN)), ("discord", DC_ENABLED)) if on]
-    print(f"canais: {','.join(canais)} | mensagens lidas: {n} | alertas: {sent} | "
+    print(f"{'DESLIGADO' if st.get('paused') else 'ligado'} | canais: {','.join(canais)} | mensagens lidas: {n} | alertas: {sent} | "
           f"interesses: {len(st['interests'])} | vistos: {len(st['seen'])}")
 
 if __name__ == "__main__":
