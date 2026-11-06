@@ -39,7 +39,8 @@ Interesses e IDs ficam em `state.enc`, cifrado com AES-256 usando o secret `STAT
 
 ## Limitações
 - Comandos e alertas são processados a cada rodada do agendador (o cron do GitHub atrasa às vezes). A 1ª rodada só memoriza as ofertas existentes, sem enviar nada.
-- Cada rodada vê ~24 ofertas recentes do Promobit; ofertas que sumirem da primeira página entre rodadas podem passar.
+- Cada rodada percorre ~10 páginas do Promobit (~120 ofertas recentes; ajustável com a variável `PROMOBIT_PAGES`). Se o intervalo entre rodadas for de horas, ofertas mais antigas que isso podem passar.
+- O agendamento (`cron`) do GitHub Actions é pouco confiável: pode rodar com horas de intervalo. Para ter rodadas de 5 em 5 minutos de verdade, dispare o workflow por um serviço externo (cron-job.org → API `workflow_dispatch`).
 - Pelando usa Cloudflare e normalmente devolve 403; nesse caso é ignorado (aparece no log).
 - O estado vai cifrado para o repositório (`state.enc`). Os logs do Actions de um repo público são visíveis a todos: eles mostram só contagens (ex.: "interesses: 2"), nunca os termos.
 - Minutos grátis: repo privado = 2000 min/mês → use `*/30`. Repo público é ilimitado → use `*/5` (o mínimo do GitHub; na prática o agendador pode atrasar).

@@ -229,9 +229,10 @@ def next_data(html):
         raise ValueError("__NEXT_DATA__ não encontrado (layout mudou ou bloqueio)")
     return json.loads(m.group(1))
 
-def parse_promobit(html):
-    pp = next_data(html)["props"]["pageProps"]
-    raw = list(pp.get("serverFeaturedOffers") or []) + list((pp.get("serverOffers") or {}).get("offers") or [])
+PROMOBIT = "https://www.promobit.com.br"
+PROMOBIT_PAGES = int(os.environ.get("PROMOBIT_PAGES", "10"))  # ~12 ofertas por página
+
+def promobit_offers(raw):
     out, ids = [], set()
     for o in raw:
         oid = o.get("offerId")
@@ -246,17 +247,36 @@ def parse_promobit(html):
             "old_price": float(old) if old and old > 1 else None,
             "discount": o.get("offerDiscontPercentage") or None,
             "coupon": o.get("offerCoupon"), "store": o.get("storeName"),
-            "url": f"https://www.promobit.com.br/oferta/{o['offerSlug']}/",
+            "url": f"{PROMOBIT}/oferta/{o['offerSlug']}/",
         })
     return out
 
+def parse_promobit(html):
+    pp = next_data(html)["props"]["pageProps"]
+    return promobit_offers(list(pp.get("serverFeaturedOffers") or []) + list((pp.get("serverOffers") or {}).get("offers") or []))
+
 def fetch_promobit():
-    out = []
-    for u in ("https://www.promobit.com.br/promocoes/recentes/", "https://www.promobit.com.br/"):
+    """1ª página pelo HTML; as seguintes pelo endpoint JSON do próprio site (cursor 'after')."""
+    html = http_get(f"{PROMOBIT}/promocoes/recentes/")
+    nd = next_data(html)
+    out = parse_promobit(html)
+    so = nd["props"]["pageProps"].get("serverOffers") or {}
+    build, after, vistos = nd.get("buildId"), so.get("after"), set()
+    for _ in range(PROMOBIT_PAGES - 1):
+        if not build or not after or after in vistos:
+            break
+        vistos.add(after)
         try:
-            out += parse_promobit(http_get(u))
+            data = json.loads(http_get(f"{PROMOBIT}/_next/data/{build}/promocoes/recentes.json?after={urllib.parse.quote(after)}"))
         except Exception as e:
-            print(f"[promobit] {u}: {e}", file=sys.stderr)
+            print(f"[promobit] paginação parou: {e}", file=sys.stderr)
+            break
+        so = (data.get("pageProps") or {}).get("serverOffers") or {}
+        page = promobit_offers(so.get("offers") or [])
+        if not page:
+            break
+        out += page
+        after = so.get("after")
     return {o["id"]: o for o in out}.values()
 
 def fetch_pelando():
