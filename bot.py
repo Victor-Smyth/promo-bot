@@ -3,7 +3,7 @@
 1) lê comandos novos enviados ao bot, 2) busca ofertas, 3) avisa só as que casam
 com os seus interesses. Estado (interesses, ofertas já vistas) fica em state.json.
 Sem dependências externas (só biblioteca padrão)."""
-import json, os, re, sys, unicodedata, urllib.parse, urllib.request, urllib.error
+import json, os, re, sys, time, unicodedata, urllib.parse, urllib.request, urllib.error
 from pathlib import Path
 
 STATE_FILE = Path(os.environ.get("STATE_FILE", "state.json"))
@@ -100,8 +100,19 @@ def tg(method, **params):
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{TG_TOKEN}/{method}",
         data=json.dumps(params).encode(), headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=40) as r:
-        return json.load(r)["result"]
+    for tentativa in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=40) as r:
+                return json.load(r)["result"]
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and tentativa < 3:  # limite de envio: espera o tempo pedido e repete
+                try:
+                    espera = json.loads(e.read()).get("parameters", {}).get("retry_after", 1)
+                except Exception:
+                    espera = 1
+                time.sleep(min(float(espera), 15) + 0.2)
+                continue
+            raise
 
 def tg_send(chat_id, text):
     try:
@@ -115,15 +126,26 @@ def dc(method, path, body=None):
         data=json.dumps(body).encode() if body is not None else None,
         headers={"Authorization": f"Bot {DC_TOKEN}", "Content-Type": "application/json",
                  "User-Agent": "DiscordBot (https://github.com/promo-bot, 1.0)"})
-    try:
-        with urllib.request.urlopen(req, timeout=40) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        detalhe = e.read().decode("utf-8", "replace")[:300]
-        dica = {401: "token inválido", 403: "bot sem permissão no canal (Ver canal / Ler histórico)",
-                404: "canal não encontrado: confira DISCORD_CHANNEL_ID (precisa ser o ID do canal, não do servidor)"}.get(e.code, "")
-        raise RuntimeError(f"HTTP {e.code} {dica} | {detalhe}") from None
+    for tentativa in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=40) as r:
+                raw = r.read()
+                return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            detalhe = e.read().decode("utf-8", "replace")[:300]
+            if e.code == 429 and tentativa < 3:  # limite de envio: espera o tempo pedido e repete
+                try:
+                    espera = json.loads(detalhe).get("retry_after", 1)
+                except Exception:
+                    espera = 1
+                time.sleep(min(float(espera), 15) + 0.2)
+                continue
+            raise_dc(e.code, detalhe)
+
+def raise_dc(code, detalhe):
+    dica = {401: "token inválido", 403: "bot sem permissão no canal (Ver canal / Ler histórico)",
+            404: "canal não encontrado: confira DISCORD_CHANNEL_ID (precisa ser o ID do canal, não do servidor)"}.get(code, "")
+    raise RuntimeError(f"HTTP {code} {dica} | {detalhe}") from None
 
 def dc_send(text):
     try:

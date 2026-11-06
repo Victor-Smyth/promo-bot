@@ -2,6 +2,7 @@ import json, os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ["STATE_FILE"] = os.path.join(tempfile.mkdtemp(), "state.json")
 import bot
+REAL_DC, REAL_DC_SEND = bot.dc, bot.dc_send  # originais, pois alguns testes os substituem
 
 SENT = []
 bot.notify = lambda st, text: SENT.append(text)
@@ -81,3 +82,38 @@ def test_discord_flow():
     bot.process_discord(st)
     assert calls[-1][1].endswith("after=5")  # só lê mensagens novas
     bot.DC_ENABLED = False
+    bot.dc, bot.dc_send = REAL_DC, REAL_DC_SEND
+
+
+def test_retry_on_429():
+    """Discord devolve 429 duas vezes e depois aceita: a mensagem não pode ser perdida."""
+    import io, urllib.error
+    bot.DC_TOKEN = "x"; bot.DC_CHANNEL = "1"
+    bot.time.sleep = lambda s: None
+    estados = {"n": 0}
+    class R:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self): return b'{"id":"9"}'
+    def fake_urlopen(req, timeout=0):
+        estados["n"] += 1
+        if estados["n"] <= 2:
+            raise urllib.error.HTTPError(req.full_url, 429, "RL", {}, io.BytesIO(b'{"retry_after":0.3}'))
+        return R()
+    orig = bot.urllib.request.urlopen
+    bot.urllib.request.urlopen = fake_urlopen
+    try:
+        assert bot.dc("POST", "/channels/1/messages", {"content": "x"}) == {"id": "9"}
+        assert estados["n"] == 3
+        # 404 continua dando mensagem clara e sem repetir
+        estados["n"] = 0
+        def fake404(req, timeout=0):
+            estados["n"] += 1
+            raise urllib.error.HTTPError(req.full_url, 404, "NF", {}, io.BytesIO(b'{"code":10003}'))
+        bot.urllib.request.urlopen = fake404
+        try:
+            bot.dc("GET", "/x"); assert False
+        except RuntimeError as e:
+            assert "DISCORD_CHANNEL_ID" in str(e) and estados["n"] == 1
+    finally:
+        bot.urllib.request.urlopen = orig
